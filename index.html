@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>剪贴板同步</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f4f0;
+    --surface: #ffffff;
+    --surface2: #f0efe9;
+    --border: rgba(0,0,0,0.1);
+    --border2: rgba(0,0,0,0.18);
+    --text: #1a1a18;
+    --text2: #6b6b66;
+    --text3: #9e9e98;
+    --accent: #1a1a18;
+    --accent-bg: #1a1a18;
+    --accent-text: #ffffff;
+    --success: #2a7a4b;
+    --success-bg: #e8f5ee;
+    --error: #c0392b;
+    --error-bg: #fdecea;
+    --info: #1a5fa8;
+    --info-bg: #e8f1fb;
+    --radius: 10px;
+    --radius-lg: 16px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111110;
+      --surface: #1c1c1a;
+      --surface2: #242422;
+      --border: rgba(255,255,255,0.08);
+      --border2: rgba(255,255,255,0.14);
+      --text: #e8e8e2;
+      --text2: #8a8a84;
+      --text3: #55554f;
+      --accent: #e8e8e2;
+      --accent-bg: #e8e8e2;
+      --accent-text: #111110;
+      --success: #4caf78;
+      --success-bg: #0f2b1c;
+      --error: #e57373;
+      --error-bg: #2a1010;
+      --info: #6aacf5;
+      --info-bg: #0d1f35;
+    }
+  }
+
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 420px;
+  }
+
+  /* 顶部标题 */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .logo-icon {
+    width: 28px;
+    height: 28px;
+    background: var(--accent-bg);
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .logo-icon svg { color: var(--accent-text); }
+
+  .role-badge {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border2);
+    color: var(--text2);
+  }
+
+  /* 卡片 */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+  }
+
+  /* 状态行 */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text2);
+    margin-bottom: 1.25rem;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: var(--radius);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-wait   { background: #f0a500; }
+  .dot-ok     { background: var(--success); animation: blink 2s infinite; }
+  .dot-err    { background: var(--error); }
+  .dot-off    { background: var(--text3); }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* 配对码展示 */
+  .code-wrap {
+    margin: 1.25rem 0;
+  }
+
+  .code-label {
+    font-size: 12px;
+    color: var(--text3);
+    margin-bottom: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  .code-digits {
+    display: flex;
+    gap: 7px;
+  }
+
+  .digit-box {
+    flex: 1;
+    aspect-ratio: 1;
+    max-width: 56px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    transition: background .2s, border-color .2s, color .2s;
+  }
+
+  .digit-box.lit {
+    background: var(--info-bg);
+    border-color: var(--info);
+    color: var(--info);
+  }
+
+  /* 倒计时进度条 */
+  .progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .progress-bar {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--info);
+    border-radius: 2px;
+    transition: width 1s linear, background .3s;
+  }
+
+  .progress-fill.warn { background: #f0a500; }
+  .progress-fill.urgent { background: var(--error); }
+
+  .progress-num {
+    font-size: 12px;
+    color: var(--text3);
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 输入区 */
+  .code-input-row {
+    display: flex;
+    gap: 7px;
+    margin: 1.25rem 0;
+  }
+
+  .code-input-row input {
+    flex: 1;
+    aspect-ratio: 1;
+    max-width: 56px;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    outline: none;
+    transition: border-color .15s, background .15s;
+    -webkit-appearance: none;
+    caret-color: transparent;
+  }
+
+  .code-input-row input:focus {
+    border-color: var(--info);
+    background: var(--info-bg);
+    color: var(--info);
+  }
+
+  .code-input-row input.filled {
+    border-color: var(--border2);
+    background: var(--surface);
+  }
+
+  /* 按钮 */
+  .btn {
+    width: 100%;
+    padding: 13px;
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    background: transparent;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    transition: background .12s, transform .1s;
+    line-height: 1;
+  }
+  .btn:hover  { background: var(--surface2); }
+  .btn:active { transform: scale(.98); }
+
+  .btn-primary {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+    border-color: transparent;
+  }
+  .btn-primary:hover { opacity: .88; background: var(--accent-bg); }
+
+  .btn-success {
+    background: var(--success-bg);
+    color: var(--success);
+    border-color: transparent;
+  }
+
+  /* 同步区 */
+  .sync-section { margin-top: 1.25rem; }
+
+  .sync-label {
+    font-size: 12px;
+    color: var(--text3);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sync-indicator {
+    font-size: 11px;
+    color: var(--success);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .sync-indicator.show { opacity: 1; }
+
+  textarea {
+    width: 100%;
+    min-height: 130px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.65;
+    resize: vertical;
+    outline: none;
+    font-family: inherit;
+    transition: border-color .15s;
+  }
+  textarea:focus { border-color: var(--border2); }
+
+  .actions {
+    display: flex;
+    gap: 7px;
+    margin-top: 8px;
+  }
+
+  .actions .btn {
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+
+  /* 历史记录 */
+  .history { margin-top: 1.25rem; }
+
+  .history-label {
+    font-size: 12px;
+    color: var(--text3);
+    margin-bottom: 8px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .hist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    margin-bottom: 5px;
+    cursor: pointer;
+    transition: background .1s;
+  }
+  .hist-item:hover { background: var(--surface2); }
+
+  .hist-text {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text2);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .hist-delete {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    color: var(--text3);
+    cursor: pointer;
+    transition: background .15s, color .15s;
+    flex-shrink: 0;
+  }
+  .hist-delete:hover {
+    background: var(--error-bg);
+    color: var(--error);
+  }
+
+  .tag {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+  .tag-text { background: var(--surface2); color: var(--text3); }
+  .tag-link { background: var(--info-bg); color: var(--info); }
+  .tag-code { background: #fff8e0; color: #a07000; }
+  @media (prefers-color-scheme: dark) {
+    .tag-code { background: #2a2000; color: #d4a000; }
+  }
+
+  /* 提示/错误消息 */
+  .toast {
+    font-size: 13px;
+    padding: 9px 13px;
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    display: none;
+  }
+  .toast.show { display: block; }
+  .toast-err  { background: var(--error-bg); color: var(--error); }
+  .toast-ok   { background: var(--success-bg); color: var(--success); }
+  .toast-info { background: var(--info-bg); color: var(--info); }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.25rem 0;
+  }
+
+  /* 断线重连提示 */
+  .reconnect-tip {
+    font-size: 12px;
+    color: var(--text3);
+    text-align: center;
+    margin-top: 10px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="3" y="1" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M5 4h6M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <rect x="5.5" y=".5" width="5" height="2.5" rx=".75" fill="currentColor"/>
+        </svg>
+      </div>
+      剪贴板同步
+    </div>
+    <span class="role-badge" id="role-badge">选择角色</span>
+  </div>
+
+  <!-- 选择角色 -->
+  <div id="view-select" class="card">
+    <p style="font-size:14px;color:var(--text2);margin-bottom:1.25rem;line-height:1.7;">
+      选择当前设备的角色，两台设备通过 6 位配对码建立连接。
+    </p>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" style="flex:1" onclick="initRole('host')">
+        设备 A<br><span style="font-size:12px;color:var(--text3);font-weight:400">生成配对码</span>
+      </button>
+      <button class="btn btn-primary" style="flex:1" onclick="initRole('guest')">
+        设备 B<br><span style="font-size:12px;opacity:.7;font-weight:400">输入配对码</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 设备 A：等待配对 -->
+  <div id="view-host-wait" class="card" style="display:none">
+    <div id="toast-host" class="toast"></div>
+    <div class="status-bar">
+      <div class="dot dot-wait" id="dot-host"></div>
+      <span id="status-host">等待设备 B 连接...</span>
+    </div>
+
+    <div class="code-wrap">
+      <p class="code-label">你的配对码</p>
+      <div class="code-digits" id="code-digits"></div>
+      <div class="progress-wrap">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <span class="progress-num" id="progress-num">60</span>
+      </div>
+    </div>
+
+    <p style="font-size:13px;color:var(--text3);line-height:1.6;">
+      将此 6 位数字告诉设备 B，对方输入后自动建立连接。配对码一次性有效。
+    </p>
+  </div>
+
+  <!-- 设备 A：已连接 -->
+  <div id="view-host-connected" class="card" style="display:none">
+    <div id="toast-host-c" class="toast"></div>
+    <div class="status-bar">
+      <div class="dot dot-ok"></div>
+      <span>与设备 B 已连接，内容实时同步</span>
+    </div>
+    <div class="sync-section">
+      <div class="sync-label">
+        剪贴板内容
+        <span class="sync-indicator" id="sync-ind-host">已同步</span>
+      </div>
+      <textarea id="ta-host" placeholder="在此输入或粘贴内容，将自动同步到设备 B…"></textarea>
+      <div class="actions">
+        <button class="btn" onclick="pasteClip('host')">粘贴本机</button>
+        <button class="btn" onclick="copyClip('host')">复制到本机</button>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="history">
+      <p class="history-label">历史记录</p>
+      <div id="hist-host"></div>
+    </div>
+  </div>
+
+  <!-- 设备 B：输入配对码 -->
+  <div id="view-guest-input" class="card" style="display:none">
+    <div id="toast-guest" class="toast"></div>
+    <div class="status-bar">
+      <div class="dot dot-off"></div>
+      <span>输入对方的 6 位配对码</span>
+    </div>
+    <div class="code-input-row" id="guest-inputs"></div>
+    <button class="btn btn-primary" id="btn-connect" onclick="doConnect()">连接</button>
+    <p class="reconnect-tip" id="reconnect-tip">正在连接服务器...</p>
+  </div>
+
+  <!-- 设备 B：已连接 -->
+  <div id="view-guest-connected" class="card" style="display:none">
+    <div id="toast-guest-c" class="toast"></div>
+    <div class="status-bar">
+      <div class="dot dot-ok"></div>
+      <span>与设备 A 已连接，内容实时同步</span>
+    </div>
+    <div class="sync-section">
+      <div class="sync-label">
+        剪贴板内容
+        <span class="sync-indicator" id="sync-ind-guest">已同步</span>
+      </div>
+      <textarea id="ta-guest" placeholder="在此输入或粘贴内容，将自动同步到设备 A…"></textarea>
+      <div class="actions">
+        <button class="btn" onclick="pasteClip('guest')">粘贴本机</button>
+        <button class="btn" onclick="copyClip('guest')">复制到本机</button>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="history">
+      <p class="history-label">历史记录</p>
+      <div id="hist-guest"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+
+let ws = null
+let role = null
+let history = []
+let syncTimer = null
+let timerInterval = null
+let ttl = 60
+
+// ── 工具 ──────────────────────────────────────────────────────
+function show(id)  { document.getElementById(id).style.display = 'block' }
+function hide(id)  { document.getElementById(id).style.display = 'none' }
+
+function showToast(id, msg, type = 'info', ms = 3000) {
+  const el = document.getElementById(id)
+  el.textContent = msg
+  el.className = `toast toast-${type} show`
+  setTimeout(() => el.classList.remove('show'), ms)
+}
+
+function getType(text) {
+  if (/^https?:\/\//.test(text.trim())) return 'link'
+  if (/[{};=>()[\]]/.test(text) && text.length > 10) return 'code'
+  return 'text'
+}
+
+function addHistory(text) {
+  if (!text.trim()) return
+  history = [{ text, type: getType(text) }, ...history.filter(h => h.text !== text)].slice(0, 6)
+  renderHistory()
+}
+
+function renderHistory() {
+  ;['host', 'guest'].forEach(r => {
+    const el = document.getElementById(`hist-${r}`)
+    if (!el) return
+    el.innerHTML = history.map((h, i) => `
+      <div class="hist-item" onclick="selectHist(${i})">
+        <span class="hist-text">${h.text.replace(/</g,'&lt;')}</span>
+        <span class="tag tag-${h.type}">${h.type === 'link' ? '链接' : h.type === 'code' ? '代码' : '文本'}</span>
+        <span class="hist-delete" onclick="event.stopPropagation(); deleteHist(${i})">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 3h8M3 3v7a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V3M5 5v4M7 5v4"/>
+          </svg>
+        </span>
+      </div>
+    `).join('')
+  })
+}
+
+function selectHist(i) {
+  const text = history[i].text
+  document.getElementById('ta-host') && (document.getElementById('ta-host').value = text)
+  document.getElementById('ta-guest') && (document.getElementById('ta-guest').value = text)
+  sendSync(text)
+}
+
+function deleteHist(i) {
+  history.splice(i, 1)
+  renderHistory()
+}
+
+// ── 配对码渲染 ────────────────────────────────────────────────
+function renderCode(code) {
+  const container = document.getElementById('code-digits')
+  container.innerHTML = ''
+  String(code).split('').forEach((d, i) => {
+    const box = document.createElement('div')
+    box.className = 'digit-box'
+    box.id = `db${i}`
+    box.textContent = d
+    container.appendChild(box)
+    setTimeout(() => { box.classList.add('lit'); setTimeout(() => box.classList.remove('lit'), 400) }, i * 70)
+  })
+}
+
+function startCountdown(total) {
+  clearInterval(timerInterval)
+  ttl = total
+  const fill = document.getElementById('progress-fill')
+  const num  = document.getElementById('progress-num')
+  timerInterval = setInterval(() => {
+    ttl--
+    const pct = (ttl / total) * 100
+    fill.style.width = pct + '%'
+    num.textContent = ttl
+    fill.className = 'progress-fill' + (ttl <= 10 ? ' urgent' : ttl <= 20 ? ' warn' : '')
+    if (ttl <= 0) clearInterval(timerInterval)
+  }, 1000)
+}
+
+// ── 设备 B 输入框 ─────────────────────────────────────────────
+function buildGuestInputs() {
+  const row = document.getElementById('guest-inputs')
+  row.innerHTML = ''
+  for (let i = 0; i < 6; i++) {
+    const inp = document.createElement('input')
+    inp.type = 'text'
+    inp.inputMode = 'numeric'
+    inp.maxLength = 1
+    inp.id = `gi${i}`
+    inp.autocomplete = 'off'
+    inp.addEventListener('input', e => {
+      inp.value = inp.value.replace(/\D/g, '').slice(-1)
+      inp.classList.toggle('filled', !!inp.value)
+      if (inp.value && i < 5) document.getElementById(`gi${i+1}`).focus()
+      if (i === 5 && getGuestCode().length === 6) doConnect()
+    })
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Backspace' && !inp.value && i > 0) document.getElementById(`gi${i-1}`).focus()
+    })
+    inp.addEventListener('paste', e => {
+      e.preventDefault()
+      const txt = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g,'').slice(0,6)
+      txt.split('').forEach((c, j) => {
+        const el = document.getElementById(`gi${j}`)
+        if (el) { el.value = c; el.classList.add('filled') }
+      })
+      if (txt.length === 6) doConnect()
+    })
+    row.appendChild(inp)
+  }
+}
+
+function getGuestCode() {
+  return Array.from({ length: 6 }, (_, i) => document.getElementById(`gi${i}`)?.value || '').join('')
+}
+
+function shakeInputs() {
+  const row = document.getElementById('guest-inputs')
+  row.animate([
+    { transform: 'translateX(-7px)' }, { transform: 'translateX(7px)' },
+    { transform: 'translateX(-5px)' }, { transform: 'translateX(5px)' },
+    { transform: 'translateX(0)' }
+  ], { duration: 300, easing: 'ease-out' })
+}
+
+// ── WebSocket ────────────────────────────────────────────────
+function connect(queryRole) {
+  ws = new WebSocket(`${WS_URL}?role=${queryRole}`)
+
+  ws.onopen = () => {
+    console.log('[WS] 已连接')
+    if (queryRole === 'guest') document.getElementById('reconnect-tip').style.display = 'none'
+  }
+
+  ws.onmessage = ({ data }) => {
+    let msg
+    try { msg = JSON.parse(data) } catch { return }
+    handleMessage(msg)
+  }
+
+  ws.onclose = () => {
+    console.log('[WS] 连接断开')
+    if (role === 'guest') {
+      showToast('toast-guest-c', '与服务器断开，3 秒后重连...', 'err', 4000)
+      setTimeout(() => connect('guest'), 3000)
+    }
+  }
+
+  ws.onerror = () => {
+    console.error('[WS] 连接错误')
+  }
+}
+
+function handleMessage(msg) {
+  switch (msg.event) {
+    case 'code':
+      renderCode(msg.code)
+      startCountdown(msg.ttl || 60)
+      break
+
+    case 'paired':
+      clearInterval(timerInterval)
+      // host 侧：切换到已连接视图
+      if (role === 'host') {
+        hide('view-host-wait')
+        show('view-host-connected')
+        document.getElementById('role-badge').textContent = '设备 A'
+      }
+      // guest 侧：切换到已连接视图，恢复内容
+      if (role === 'guest') {
+        hide('view-guest-input')
+        show('view-guest-connected')
+        document.getElementById('role-badge').textContent = '设备 B'
+        if (msg.last) {
+          document.getElementById('ta-guest').value = msg.last
+          addHistory(msg.last)
+        }
+      }
+      break
+
+    case 'sync':
+      if (role === 'host') {
+        document.getElementById('ta-host').value = msg.text
+        flashSyncInd('host')
+      } else {
+        document.getElementById('ta-guest').value = msg.text
+        flashSyncInd('guest')
+      }
+      addHistory(msg.text)
+      break
+
+    case 'disconnected':
+      if (role === 'host') showToast('toast-host-c', '设备 B 已断开连接', 'err', 5000)
+      if (role === 'guest') showToast('toast-guest-c', '设备 A 已断开连接', 'err', 5000)
+      break
+
+    case 'error':
+      if (msg.code === 'INVALID_CODE') {
+        showToast('toast-guest', msg.msg, 'err')
+        shakeInputs()
+      }
+      break
+  }
+}
+
+function flashSyncInd(r) {
+  const el = document.getElementById(`sync-ind-${r}`)
+  el.classList.add('show')
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => el.classList.remove('show'), 1500)
+}
+
+// ── 操作 ──────────────────────────────────────────────────────
+function initRole(r) {
+  role = r
+  hide('view-select')
+  document.getElementById('role-badge').textContent = r === 'host' ? '设备 A' : '设备 B'
+
+  if (r === 'host') {
+    show('view-host-wait')
+    connect('host')
+  } else {
+    buildGuestInputs()
+    show('view-guest-input')
+    connect('guest')
+  }
+}
+
+function doConnect() {
+  const code = getGuestCode()
+  if (code.length < 6) { shakeInputs(); return }
+  ws.send(JSON.stringify({ event: 'pair', code }))
+}
+
+let debounceTimer = null
+function sendSync(text) {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    if (ws?.readyState === 1) ws.send(JSON.stringify({ event: 'sync', text }))
+  }, 300)
+}
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'ta-host' || e.target.id === 'ta-guest') {
+    sendSync(e.target.value)
+  }
+})
+
+async function pasteClip(r) {
+  try {
+    const text = await navigator.clipboard.readText()
+    const ta = document.getElementById(`ta-${r}`)
+    ta.value = text
+    sendSync(text)
+    addHistory(text)
+  } catch {
+    showToast(r === 'host' ? 'toast-host-c' : 'toast-guest-c', '请在浏览器中允许剪贴板访问权限', 'info')
+  }
+}
+
+async function copyClip(r) {
+  const text = document.getElementById(`ta-${r}`)?.value
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast(r === 'host' ? 'toast-host-c' : 'toast-guest-c', '已复制到本机剪贴板', 'ok', 1500)
+  } catch {
+    showToast(r === 'host' ? 'toast-host-c' : 'toast-guest-c', '复制失败，请手动选中文本', 'err')
+  }
+}
+</script>
+</body>
+</html>
